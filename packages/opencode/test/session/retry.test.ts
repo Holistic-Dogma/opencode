@@ -226,6 +226,19 @@ describe("session.retry.retryable", () => {
     })
   })
 
+  test("retries synthesized silent stream termination errors", () => {
+    // processor.ts synthesizes this error when a provider stream ends without
+    // a finish event; it must classify as retryable for the retry policy to engage.
+    const request = MessageV2.fromError(
+      new ProviderError.ResponseStreamError("Provider stream ended without a finish event"),
+      { providerID },
+    )
+    expect(SessionV1.APIError.isInstance(request)).toBe(true)
+    expect(SessionRetry.retryable(request, retryProvider)).toEqual({
+      message: "Provider stream ended without a finish event",
+    })
+  })
+
   test("does not retry context overflow errors", () => {
     const error = new SessionV1.ContextOverflowError({
       message: "Input exceeds context window of this model",

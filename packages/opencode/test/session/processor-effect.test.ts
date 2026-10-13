@@ -226,6 +226,35 @@ const fragmentFailureLLM = Layer.succeed(
 const fragmentFailureEnv = LayerNode.compile(root, [...replacements, [LLM.node, fragmentFailureLLM]])
 const itFragmentFailure = testEffect(fragmentFailureEnv)
 
+let silentEndCalls = 0
+const silentEndLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () => {
+      silentEndCalls++
+      // The silent-death shape: partial output, then the stream just ends —
+      // no finish part, no error (e.g. the provider socket closed quietly).
+      if (silentEndCalls === 1) {
+        return Stream.make(
+          LLMEvent.stepStart({ index: 0 }),
+          LLMEvent.textStart({ id: "text-1" }),
+          LLMEvent.textDelta({ id: "text-1", text: "partial" }),
+        )
+      }
+      return Stream.make(
+        LLMEvent.stepStart({ index: 0 }),
+        LLMEvent.textStart({ id: "text-1" }),
+        LLMEvent.textDelta({ id: "text-1", text: "recovered" }),
+        LLMEvent.textEnd({ id: "text-1" }),
+        LLMEvent.stepFinish({ index: 0, reason: "stop" }),
+        LLMEvent.finish({ reason: "stop" }),
+      )
+    },
+  }),
+)
+const silentEndEnv = LayerNode.compile(root, [...replacements, [LLM.node, silentEndLLM]])
+const itSilentEnd = testEffect(silentEndEnv)
+
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
   const session = yield* Session.Service
@@ -1108,6 +1137,63 @@ itFragmentFailure.live("session.processor effect tests retain partial legacy par
         expect(seen).toContain(MessageV2.Event.PartUpdated.type)
         expect(seen).toContain(Session.Event.Error.type)
         expect(seen.filter((type) => type.startsWith("session.next."))).toEqual([])
+      }),
+    { config: cfg },
+  ),
+)
+
+itSilentEnd.live("session.processor effect tests retry a stream that ends without a finish event", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        silentEndCalls = 0
+        const { processors, session, provider } = yield* boot()
+        const events = yield* EventV2Bridge.Service
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "silent death")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+
+        const retries: { attempt: number; message: string }[] = []
+        const off = yield* events.listen((event) => {
+          if (event.type !== SessionStatus.Event.Status.type) return Effect.void
+          const data = event.data as typeof SessionStatus.Event.Status.data.Type
+          if (data.sessionID !== chat.id || data.status.type !== "retry") return Effect.void
+          retries.push({ attempt: data.status.attempt, message: data.status.message })
+          return Effect.void
+        })
+
+        const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+        const result = yield* handle.process({
+          user: {
+            id: parent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: parent.time,
+            agent: parent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies SessionV1.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "silent death" }],
+          tools: {},
+        })
+        yield* off
+
+        // The silent end surfaced as a retryable error, the policy re-ran the
+        // stream, and the recovered turn completed normally.
+        expect(result).toBe("continue")
+        expect(silentEndCalls).toBe(2)
+        expect(retries.length).toBeGreaterThan(0)
+        expect(retries[0]).toEqual({ attempt: 1, message: "Provider stream ended without a finish event" })
+        expect(handle.message.error).toBeUndefined()
+
+        const parts = yield* MessageV2.parts(msg.id)
+        expect(parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
       }),
     { config: cfg },
   ),

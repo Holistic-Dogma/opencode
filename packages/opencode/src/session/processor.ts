@@ -19,6 +19,7 @@ import { SessionRetry } from "./retry"
 import { SessionStatus } from "./status"
 import { SessionSummary } from "./summary"
 import type { Provider } from "@/provider/provider"
+import { ProviderError } from "@/provider/error"
 import { Question } from "@/question"
 import { errorMessage } from "@/util/error"
 import { isRecord } from "@/util/record"
@@ -113,6 +114,7 @@ const layer = Layer.effect(
         reasoningMap: {},
       }
       let aborted = false
+      let finished = false
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -532,6 +534,7 @@ const layer = Layer.effect(
             return
 
           case "finish":
+            finished = true
             return
         }
       })
@@ -636,6 +639,7 @@ const layer = Layer.effect(
           yield* Effect.gen(function* () {
             ctx.currentText = undefined
             ctx.reasoningMap = {}
+            finished = false
             yield* status.set(ctx.sessionID, { type: "busy" })
             const stream = llm.stream(streamInput)
 
@@ -644,6 +648,13 @@ const layer = Layer.effect(
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,
             )
+
+            // A provider stream that ends without a finish event died silently
+            // (socket closed with no error). Surface it as a retryable failure
+            // so SessionRetry.policy engages instead of completing the turn.
+            if (!finished && !ctx.needsCompaction) {
+              throw new ProviderError.ResponseStreamError("Provider stream ended without a finish event")
+            }
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
