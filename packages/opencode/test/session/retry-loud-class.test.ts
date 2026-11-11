@@ -151,9 +151,7 @@ const nonRetryableLLM = Layer.succeed(
     },
   }),
 )
-const itNonRetryable = testEffect(
-  LayerNode.compile(root, [...replacements, [LLM.node, nonRetryableLLM]]),
-)
+const itNonRetryable = testEffect(LayerNode.compile(root, [...replacements, [LLM.node, nonRetryableLLM]]))
 
 const user = Effect.fn("TestSession.user")(function* (sessionID: SessionID, text: string) {
   const session = yield* Session.Service
@@ -284,21 +282,28 @@ describe("session.retry.loud-class", () => {
   })
 })
 
-itLoud.live("a retryable APIError mid-turn re-issues the turn", () =>
-  provideTmpdirInstance(
-    (dir) =>
-      Effect.gen(function* () {
-        loudCalls = 0
-        const { result, handle } = yield* process(dir, "loud death")
+itLoud.live(
+  "a retryable APIError mid-turn re-issues the turn",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          loudCalls = 0
+          const { result, handle } = yield* process(dir, "loud death")
 
-        // The failed turn was re-issued: two provider calls, and the turn
-        // completed on the second one.
-        expect(loudCalls).toBe(2)
-        expect(result).toBe("continue")
-        expect(handle.message.error).toBeUndefined()
-      }),
-    { config: cfg as any },
-  ),
+          // The failed turn was re-issued: two provider calls, and the turn
+          // completed on the second one.
+          expect(loudCalls).toBe(2)
+          expect(result).toBe("continue")
+          expect(handle.message.error).toBeUndefined()
+        }),
+      { config: cfg as any },
+    ),
+  // This test sits at 2.1s unloaded and 3.7s under host load, close enough to
+  // bun's 5000ms default per-test timeout to be killed on timing alone. Give it
+  // the same 30s headroom the sibling retry-family tests in
+  // processor-effect.test.ts carry.
+  { timeout: 30_000 },
 )
 
 itNonRetryable.live("a non-retryable APIError does NOT re-issue the turn", () =>
