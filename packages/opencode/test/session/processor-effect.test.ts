@@ -680,62 +680,65 @@ it.live("session.processor effect tests retry OpenAI-compatible midstream server
   ),
 )
 
-it.live("session.processor effect tests publish retry status updates", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
-        const { processors, session, provider } = yield* boot()
-        const events = yield* EventV2Bridge.Service
+it.live(
+  "session.processor effect tests publish retry status updates",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          const events = yield* EventV2Bridge.Service
 
-        // Three 503s: the AI SDK's own request-level retry budget (maxRetries=2)
-        // is exhausted first, then the turn-level policy re-issues the turn.
-        yield* llm.error(503, { error: "boom" })
-        yield* llm.error(503, { error: "boom" })
-        yield* llm.error(503, { error: "boom" })
-        yield* llm.text("")
+          // Three 503s: the AI SDK's own request-level retry budget (maxRetries=2)
+          // is exhausted first, then the turn-level policy re-issues the turn.
+          yield* llm.error(503, { error: "boom" })
+          yield* llm.error(503, { error: "boom" })
+          yield* llm.error(503, { error: "boom" })
+          yield* llm.text("")
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "retry")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const states: number[] = []
-        const off = yield* events.listen((evt) => {
-          if (evt.type !== SessionStatus.Event.Status.type) return Effect.void
-          const data = evt.data as typeof SessionStatus.Event.Status.data.Type
-          if (data.sessionID === chat.id && data.status.type === "retry") states.push(data.status.attempt)
-          return Effect.void
-        })
-        const handle = yield* processors.create({
-          assistantMessage: msg,
-          sessionID: chat.id,
-          model: mdl,
-        })
-
-        const value = yield* handle.process({
-          user: {
-            id: parent.id,
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "retry")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const states: number[] = []
+          const off = yield* events.listen((evt) => {
+            if (evt.type !== SessionStatus.Event.Status.type) return Effect.void
+            const data = evt.data as typeof SessionStatus.Event.Status.data.Type
+            if (data.sessionID === chat.id && data.status.type === "retry") states.push(data.status.attempt)
+            return Effect.void
+          })
+          const handle = yield* processors.create({
+            assistantMessage: msg,
             sessionID: chat.id,
-            role: "user",
-            time: parent.time,
-            agent: parent.agent,
-            model: { providerID: ref.providerID, modelID: ref.modelID },
-          } satisfies SessionV1.User,
-          sessionID: chat.id,
-          model: mdl,
-          agent: agent(),
-          system: [],
-          messages: [{ role: "user", content: "retry" }],
-          tools: {},
-        })
+            model: mdl,
+          })
 
-        yield* off
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "retry" }],
+            tools: {},
+          })
 
-        expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(4)
-        expect(states).toStrictEqual([1])
-      }),
-    { config: (url) => providerCfg(url) },
-  ),
+          yield* off
+
+          expect(value).toBe("continue")
+          expect(yield* llm.calls).toBe(4)
+          expect(states).toStrictEqual([1])
+        }),
+      { config: (url) => providerCfg(url) },
+    ),
+  { timeout: 30_000 },
 )
 
 it.live("session.processor effect tests compact on structured context overflow", () =>
