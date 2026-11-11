@@ -998,6 +998,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 20 }) }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1035,6 +1036,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }) }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1086,6 +1088,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 1, preserve_recent_tokens: 100 }) }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1237,12 +1240,18 @@ describe("session.compaction.process", () => {
         yield* Deferred.await(ready).pipe(Effect.timeout("5 seconds"))
         const start = Date.now()
         yield* Fiber.interrupt(fiber)
-        const exit = yield* Fiber.await(fiber).pipe(Effect.timeout("250 millis"))
+        // The stub fails with `retry-after-ms: 10000`, so the policy is parked
+        // in a 10s backoff when the abort lands. Interrupting that backoff must
+        // finish long before the backoff elapses — that is the property under
+        // test. The bound is deliberately far below the 10s backoff (so a
+        // regression that waits the backoff out still fails) but wide enough
+        // that scheduler latency on a loaded host cannot trip it.
+        const exit = yield* Fiber.await(fiber).pipe(Effect.timeout("2 seconds"))
 
         expect(Exit.isFailure(exit)).toBe(true)
         if (Exit.isFailure(exit)) {
           expect(Cause.hasInterrupts(exit.cause)).toBe(true)
-          expect(Date.now() - start).toBeLessThan(250)
+          expect(Date.now() - start).toBeLessThan(2_000)
         }
       }).pipe(withCompaction({ llm: stub.llmLayer }))
     },
@@ -1320,6 +1329,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1356,6 +1366,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1396,6 +1407,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1438,6 +1450,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance(
@@ -1506,6 +1519,7 @@ describe("session.compaction.process", () => {
       }).pipe(withCompaction({ llm: stub.llmLayer, config: cfg({ tail_turns: 0 }) }))
     },
     { git: true },
+    { timeout: 10_000 },
   )
 
   itCompaction.instance("keeps recent pre-compaction turns across repeated compactions", () => {

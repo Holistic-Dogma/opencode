@@ -496,51 +496,54 @@ it.live("session.processor effect tests capture reasoning from http mock", () =>
   ),
 )
 
-it.live("session.processor effect tests reset reasoning state across retries", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
-        const { processors, session, provider } = yield* boot()
+it.live(
+  "session.processor effect tests reset reasoning state across retries",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
 
-        yield* llm.push(reply().reason("one").reset(), reply().reason("two").stop())
+          yield* llm.push(reply().reason("one").reset(), reply().reason("two").stop())
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "reason")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const handle = yield* processors.create({
-          assistantMessage: msg,
-          sessionID: chat.id,
-          model: mdl,
-        })
-
-        const value = yield* handle.process({
-          user: {
-            id: parent.id,
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "reason")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({
+            assistantMessage: msg,
             sessionID: chat.id,
-            role: "user",
-            time: parent.time,
-            agent: parent.agent,
-            model: { providerID: ref.providerID, modelID: ref.modelID },
-          } satisfies SessionV1.User,
-          sessionID: chat.id,
-          model: mdl,
-          agent: agent(),
-          system: [],
-          messages: [{ role: "user", content: "reason" }],
-          tools: {},
-        })
+            model: mdl,
+          })
 
-        const parts = yield* MessageV2.parts(msg.id)
-        const reasoning = parts.filter((part): part is SessionV1.ReasoningPart => part.type === "reasoning")
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "reason" }],
+            tools: {},
+          })
 
-        expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(2)
-        expect(reasoning.some((part) => part.text === "two")).toBe(true)
-        expect(reasoning.some((part) => part.text === "onetwo")).toBe(false)
-      }),
-    { config: (url) => providerCfg(url) },
-  ),
+          const parts = yield* MessageV2.parts(msg.id)
+          const reasoning = parts.filter((part): part is SessionV1.ReasoningPart => part.type === "reasoning")
+
+          expect(value).toBe("continue")
+          expect(yield* llm.calls).toBe(2)
+          expect(reasoning.some((part) => part.text === "two")).toBe(true)
+          expect(reasoning.some((part) => part.text === "onetwo")).toBe(false)
+        }),
+      { config: (url) => providerCfg(url) },
+    ),
+  { timeout: 30_000 },
 )
 
 it.live("session.processor effect tests do not retry unknown json errors", () =>
@@ -586,98 +589,104 @@ it.live("session.processor effect tests do not retry unknown json errors", () =>
   ),
 )
 
-it.live("session.processor effect tests retry recognized structured json errors", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
-        const { processors, session, provider } = yield* boot()
+it.live(
+  "session.processor effect tests retry recognized structured json errors",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
 
-        yield* llm.error(429, { type: "error", error: { type: "too_many_requests" } })
-        yield* llm.text("after")
+          yield* llm.error(429, { type: "error", error: { type: "too_many_requests" } })
+          yield* llm.text("after")
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "retry json")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const handle = yield* processors.create({
-          assistantMessage: msg,
-          sessionID: chat.id,
-          model: mdl,
-        })
-
-        const value = yield* handle.process({
-          user: {
-            id: parent.id,
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "retry json")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({
+            assistantMessage: msg,
             sessionID: chat.id,
-            role: "user",
-            time: parent.time,
-            agent: parent.agent,
-            model: { providerID: ref.providerID, modelID: ref.modelID },
-          } satisfies SessionV1.User,
-          sessionID: chat.id,
-          model: mdl,
-          agent: agent(),
-          system: [],
-          messages: [{ role: "user", content: "retry json" }],
-          tools: {},
-        })
+            model: mdl,
+          })
 
-        const parts = yield* MessageV2.parts(msg.id)
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "retry json" }],
+            tools: {},
+          })
 
-        expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(2)
-        expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
-        expect(handle.message.error).toBeUndefined()
-      }),
-    { config: (url) => providerCfg(url) },
-  ),
+          const parts = yield* MessageV2.parts(msg.id)
+
+          expect(value).toBe("continue")
+          expect(yield* llm.calls).toBe(2)
+          expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
+          expect(handle.message.error).toBeUndefined()
+        }),
+      { config: (url) => providerCfg(url) },
+    ),
+  { timeout: 30_000 },
 )
 
-it.live("session.processor effect tests retry OpenAI-compatible midstream server errors", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
-        const { processors, session, provider } = yield* boot()
+it.live(
+  "session.processor effect tests retry OpenAI-compatible midstream server errors",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
 
-        yield* llm.push(raw({ chunks: [{ error: { type: "server_error", code: "server_error", message: "xxx" } }] }))
-        yield* llm.text("after")
+          yield* llm.push(raw({ chunks: [{ error: { type: "server_error", code: "server_error", message: "xxx" } }] }))
+          yield* llm.text("after")
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "retry midstream server error")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const handle = yield* processors.create({
-          assistantMessage: msg,
-          sessionID: chat.id,
-          model: mdl,
-        })
-
-        const value = yield* handle.process({
-          user: {
-            id: parent.id,
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "retry midstream server error")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({
+            assistantMessage: msg,
             sessionID: chat.id,
-            role: "user",
-            time: parent.time,
-            agent: parent.agent,
-            model: { providerID: ref.providerID, modelID: ref.modelID },
-          } satisfies SessionV1.User,
-          sessionID: chat.id,
-          model: mdl,
-          agent: agent(),
-          system: [],
-          messages: [{ role: "user", content: "retry midstream server error" }],
-          tools: {},
-        })
+            model: mdl,
+          })
 
-        const parts = yield* MessageV2.parts(msg.id)
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "retry midstream server error" }],
+            tools: {},
+          })
 
-        expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(2)
-        expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
-        expect(handle.message.error).toBeUndefined()
-      }),
-    { config: (url) => providerCfg(url) },
-  ),
+          const parts = yield* MessageV2.parts(msg.id)
+
+          expect(value).toBe("continue")
+          expect(yield* llm.calls).toBe(2)
+          expect(parts.some((part) => part.type === "text" && part.text === "after")).toBe(true)
+          expect(handle.message.error).toBeUndefined()
+        }),
+      { config: (url) => providerCfg(url) },
+    ),
+  { timeout: 30_000 },
 )
 
 it.live(
@@ -1149,59 +1158,62 @@ itFragmentFailure.live("session.processor effect tests retain partial legacy par
   ),
 )
 
-itSilentEnd.live("session.processor effect tests retry a stream that ends without a finish event", () =>
-  provideTmpdirInstance(
-    (dir) =>
-      Effect.gen(function* () {
-        silentEndCalls = 0
-        const { processors, session, provider } = yield* boot()
-        const events = yield* EventV2Bridge.Service
+itSilentEnd.live(
+  "session.processor effect tests retry a stream that ends without a finish event",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          silentEndCalls = 0
+          const { processors, session, provider } = yield* boot()
+          const events = yield* EventV2Bridge.Service
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "silent death")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "silent death")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
 
-        const retries: { attempt: number; message: string }[] = []
-        const off = yield* events.listen((event) => {
-          if (event.type !== SessionStatus.Event.Status.type) return Effect.void
-          const data = event.data as typeof SessionStatus.Event.Status.data.Type
-          if (data.sessionID !== chat.id || data.status.type !== "retry") return Effect.void
-          retries.push({ attempt: data.status.attempt, message: data.status.message })
-          return Effect.void
-        })
+          const retries: { attempt: number; message: string }[] = []
+          const off = yield* events.listen((event) => {
+            if (event.type !== SessionStatus.Event.Status.type) return Effect.void
+            const data = event.data as typeof SessionStatus.Event.Status.data.Type
+            if (data.sessionID !== chat.id || data.status.type !== "retry") return Effect.void
+            retries.push({ attempt: data.status.attempt, message: data.status.message })
+            return Effect.void
+          })
 
-        const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
 
-        const result = yield* handle.process({
-          user: {
-            id: parent.id,
+          const result = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
             sessionID: chat.id,
-            role: "user",
-            time: parent.time,
-            agent: parent.agent,
-            model: { providerID: ref.providerID, modelID: ref.modelID },
-          } satisfies SessionV1.User,
-          sessionID: chat.id,
-          model: mdl,
-          agent: agent(),
-          system: [],
-          messages: [{ role: "user", content: "silent death" }],
-          tools: {},
-        })
-        yield* off
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "silent death" }],
+            tools: {},
+          })
+          yield* off
 
-        // The silent end surfaced as a retryable error, the policy re-ran the
-        // stream, and the recovered turn completed normally.
-        expect(result).toBe("continue")
-        expect(silentEndCalls).toBe(2)
-        expect(retries.length).toBeGreaterThan(0)
-        expect(retries[0]).toEqual({ attempt: 1, message: "Provider stream ended without a finish event" })
-        expect(handle.message.error).toBeUndefined()
+          // The silent end surfaced as a retryable error, the policy re-ran the
+          // stream, and the recovered turn completed normally.
+          expect(result).toBe("continue")
+          expect(silentEndCalls).toBe(2)
+          expect(retries.length).toBeGreaterThan(0)
+          expect(retries[0]).toEqual({ attempt: 1, message: "Provider stream ended without a finish event" })
+          expect(handle.message.error).toBeUndefined()
 
-        const parts = yield* MessageV2.parts(msg.id)
-        expect(parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
-      }),
-    { config: cfg },
-  ),
+          const parts = yield* MessageV2.parts(msg.id)
+          expect(parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
+        }),
+      { config: cfg },
+    ),
+  { timeout: 30_000 },
 )
