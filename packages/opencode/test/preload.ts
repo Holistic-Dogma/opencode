@@ -9,27 +9,34 @@ import { afterAll } from "bun:test"
 // Set XDG env vars FIRST, before any src/ imports
 const dir = path.join(os.tmpdir(), "opencode-test-data-" + process.pid)
 await fs.mkdir(dir, { recursive: true })
-afterAll(async () => {
-  const { AppRuntime } = await import("../src/effect/app-runtime")
-  await AppRuntime.dispose()
+afterAll(
+  async () => {
+    const { AppRuntime } = await import("../src/effect/app-runtime")
+    await AppRuntime.dispose()
 
-  const busy = (error: unknown) =>
-    typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY"
-  const rm = async (left: number): Promise<void> => {
-    Bun.gc(true)
-    await sleep(100)
-    return fs.rm(dir, { recursive: true, force: true }).catch((error) => {
-      if (!busy(error)) throw error
-      if (left <= 1 && process.platform !== "win32") throw error
-      if (left <= 1) return
-      return rm(left - 1)
-    })
-  }
+    const busy = (error: unknown) =>
+      typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY"
+    const rm = async (left: number): Promise<void> => {
+      Bun.gc(true)
+      await sleep(100)
+      return fs.rm(dir, { recursive: true, force: true }).catch((error) => {
+        if (!busy(error)) throw error
+        if (left <= 1 && process.platform !== "win32") throw error
+        if (left <= 1) return
+        return rm(left - 1)
+      })
+    }
 
-  // Windows can keep SQLite WAL handles alive until GC finalizers run, so we
-  // force GC and retry teardown to avoid flaky EBUSY in test cleanup.
-  await rm(30)
-})
+    // Windows can keep SQLite WAL handles alive until GC finalizers run, so we
+    // force GC and retry teardown to avoid flaky EBUSY in test cleanup.
+    await rm(30)
+    // This hook lives in the root scope, so its budget is bun's 5000ms runner
+    // default: a per-test `{ timeout }` and a file-level setDefaultTimeout
+    // cannot raise it, and the dispose + gc + rm teardown can exceed 5s under
+    // parallel load and fail the whole run.
+  },
+  { timeout: 30_000 },
+)
 
 process.env["XDG_DATA_HOME"] = path.join(dir, "share")
 process.env["XDG_CACHE_HOME"] = path.join(dir, "cache")

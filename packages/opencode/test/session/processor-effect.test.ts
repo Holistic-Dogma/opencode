@@ -858,72 +858,75 @@ it.live("session.processor effect tests complete AI SDK tool calls when native f
   ),
 )
 
-it.live("session.processor effect tests mark pending tools as aborted on cleanup", () =>
-  provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
-        const database = yield* Database.Service
-        const { processors, session, provider } = yield* boot()
+it.live(
+  "session.processor effect tests mark pending tools as aborted on cleanup",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const database = yield* Database.Service
+          const { processors, session, provider } = yield* boot()
 
-        yield* llm.toolHang("bash", { cmd: "pwd" })
+          yield* llm.toolHang("bash", { cmd: "pwd" })
 
-        const chat = yield* session.create({})
-        const parent = yield* user(chat.id, "tool abort")
-        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
-        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
-        const handle = yield* processors.create({
-          assistantMessage: msg,
-          sessionID: chat.id,
-          model: mdl,
-        })
-
-        const run = yield* handle
-          .process({
-            user: {
-              id: parent.id,
-              sessionID: chat.id,
-              role: "user",
-              time: parent.time,
-              agent: parent.agent,
-              model: { providerID: ref.providerID, modelID: ref.modelID },
-            } satisfies SessionV1.User,
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "tool abort")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({
+            assistantMessage: msg,
             sessionID: chat.id,
             model: mdl,
-            agent: agent(),
-            system: [],
-            messages: [{ role: "user", content: "tool abort" }],
-            tools: {},
           })
-          .pipe(Effect.forkChild)
 
-        yield* llm.wait(1)
-        yield* waitFor(
-          MessageV2.parts(msg.id).pipe(
-            Effect.map((parts) => parts.find((part): part is SessionV1.ToolPart => part.type === "tool")),
-            Effect.provideService(Database.Service, database),
-          ),
-          "timed out waiting for tool part",
-        )
-        yield* Fiber.interrupt(run)
+          const run = yield* handle
+            .process({
+              user: {
+                id: parent.id,
+                sessionID: chat.id,
+                role: "user",
+                time: parent.time,
+                agent: parent.agent,
+                model: { providerID: ref.providerID, modelID: ref.modelID },
+              } satisfies SessionV1.User,
+              sessionID: chat.id,
+              model: mdl,
+              agent: agent(),
+              system: [],
+              messages: [{ role: "user", content: "tool abort" }],
+              tools: {},
+            })
+            .pipe(Effect.forkChild)
 
-        const exit = yield* Fiber.await(run)
-        const parts = yield* MessageV2.parts(msg.id)
-        const call = parts.find((part): part is SessionV1.ToolPart => part.type === "tool")
+          yield* llm.wait(1)
+          yield* waitFor(
+            MessageV2.parts(msg.id).pipe(
+              Effect.map((parts) => parts.find((part): part is SessionV1.ToolPart => part.type === "tool")),
+              Effect.provideService(Database.Service, database),
+            ),
+            "timed out waiting for tool part",
+          )
+          yield* Fiber.interrupt(run)
 
-        expect(Exit.isFailure(exit)).toBe(true)
-        if (Exit.isFailure(exit)) {
-          expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
-        }
-        expect(yield* llm.calls).toBe(1)
-        expect(call?.state.status).toBe("error")
-        if (call?.state.status === "error") {
-          expect(call.state.error).toBe("Tool execution aborted")
-          expect(call.state.metadata?.interrupted).toBe(true)
-          expect(call.state.time.end).toBeDefined()
-        }
-      }),
-    { config: (url) => providerCfg(url) },
-  ),
+          const exit = yield* Fiber.await(run)
+          const parts = yield* MessageV2.parts(msg.id)
+          const call = parts.find((part): part is SessionV1.ToolPart => part.type === "tool")
+
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (Exit.isFailure(exit)) {
+            expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+          }
+          expect(yield* llm.calls).toBe(1)
+          expect(call?.state.status).toBe("error")
+          if (call?.state.status === "error") {
+            expect(call.state.error).toBe("Tool execution aborted")
+            expect(call.state.metadata?.interrupted).toBe(true)
+            expect(call.state.time.end).toBeDefined()
+          }
+        }),
+      { config: (url) => providerCfg(url) },
+    ),
+  { timeout: 30_000 },
 )
 
 it.live("session.processor effect tests record aborted errors and idle state", () =>

@@ -636,37 +636,49 @@ function waitStreamingRequest(pathname: string) {
   }
 }
 
-beforeAll(() => {
-  state.server = Bun.serve({
-    port: 0,
-    async fetch(req) {
-      const next = state.queue.shift()
-      if (!next) {
-        return new Response("unexpected request", { status: 500 })
-      }
+beforeAll(
+  () => {
+    state.server = Bun.serve({
+      port: 0,
+      async fetch(req) {
+        const next = state.queue.shift()
+        if (!next) {
+          return new Response("unexpected request", { status: 500 })
+        }
 
-      const url = new URL(req.url)
-      const body = (await req.json()) as Record<string, unknown>
-      next.resolve({ url, headers: req.headers, body })
+        const url = new URL(req.url)
+        const body = (await req.json()) as Record<string, unknown>
+        next.resolve({ url, headers: req.headers, body })
 
-      if (!url.pathname.endsWith(next.path)) {
-        return new Response("not found", { status: 404 })
-      }
+        if (!url.pathname.endsWith(next.path)) {
+          return new Response("not found", { status: 404 })
+        }
 
-      return typeof next.response === "function"
-        ? next.response(req, { url, headers: req.headers, body })
-        : next.response
-    },
-  })
-})
+        return typeof next.response === "function"
+          ? next.response(req, { url, headers: req.headers, body })
+          : next.response
+      },
+    })
+  },
+  { timeout: 30_000 },
+)
 
-beforeEach(() => {
-  state.queue.length = 0
-})
+// Bun budgets hooks on their own 5000ms default that a per-test `{ timeout }`
+// cannot raise, and a scheduling stall under parallel load kills a hook at
+// exactly 5000ms. Give this file's hooks the sibling 30s convention.
+beforeEach(
+  () => {
+    state.queue.length = 0
+  },
+  { timeout: 30_000 },
+)
 
-afterAll(() => {
-  void state.server?.stop()
-})
+afterAll(
+  () => {
+    void state.server?.stop()
+  },
+  { timeout: 30_000 },
+)
 
 function createChatStream(text: string) {
   const payload =
