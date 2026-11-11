@@ -489,8 +489,44 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     tools[key] = item
   }
 
+  if (flags.experimentalTelescope) {
+    // Tool Telescope seam: let plugins shrink the assembled payload via the
+    // `tool.filter` hook before it reaches the LLM. No hook / no mutation →
+    // payload untouched. Gated by OPENCODE_EXPERIMENTAL_TELESCOPE.
+    const catalog = Object.entries(tools).map(([id, tool]) => ({
+      id,
+      description: typeof tool.description === "string" ? tool.description : "",
+    }))
+    const filtered = yield* plugin.trigger(
+      "tool.filter",
+      {
+        sessionID: input.session.id,
+        agent: input.agent.name,
+        model: input.model.api.id,
+        messages: input.messages,
+        catalog,
+      },
+      { ids: Object.keys(tools) },
+    )
+    return applyToolFilter(tools, filtered.ids)
+  }
+
   return tools
 })
+
+/**
+ * Pure: rebuild a tool Record from an ordered id list, dropping unknown ids.
+ * Used by the telescope filter seam — kept separate so the seam is unit
+ * testable without the Effect layer.
+ */
+export function applyToolFilter<T>(tools: Record<string, T>, ids: string[]): Record<string, T> {
+  const next: Record<string, T> = {}
+  for (const id of ids) {
+    const tool = tools[id]
+    if (tool) next[id] = tool
+  }
+  return next
+}
 
 function toRecord(value: unknown) {
   if (isRecord(value)) return value

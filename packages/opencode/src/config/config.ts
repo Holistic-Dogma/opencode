@@ -623,7 +623,10 @@ const layer = Layer.effect(
 
     const update = Effect.fn("Config.update")(function* (config: Info) {
       const dir = yield* InstanceState.directory
-      const file = path.join(dir, "config.json")
+      // Write to opencode.json — the project config loader (ConfigPaths.files)
+      // discovers opencode.json / opencode.jsonc, NOT config.json. Writing to
+      // config.json would silently lose the update on the next reload.
+      const file = path.join(dir, "opencode.json")
       const existing = yield* loadFile(file)
       yield* fs
         .writeFileString(file, JSON.stringify(mergeDeep(writable(existing), writable(config)), null, 2))
