@@ -17,7 +17,7 @@ import {
 } from "@opencode-ai/core/v1/session"
 
 import { NamedError } from "@opencode-ai/core/util/error"
-import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
+import { APICallError, convertToModelMessages, LoadAPIKeyError, RetryError, type ModelMessage, type UIMessage } from "ai"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { NotFoundError } from "@/storage/storage"
@@ -699,6 +699,28 @@ export function fromError(
           responseHeaders: parsed.responseHeaders,
           responseBody: parsed.responseBody,
           metadata: parsed.metadata,
+        },
+        { cause: e },
+      ).toObject()
+    case RetryError.isInstance(e):
+      // The AI SDK wraps an exhausted retry budget in RetryError, which is not
+      // an APICallError — classifying it as-is would drop the underlying
+      // error's isRetryable/statusCode and demote a loud-class failure to
+      // "UnknownError" (never retried). Classify the last real error instead.
+      return fromError(e.lastError ?? e, ctx)
+    case ProviderError.isRetryableNetworkError(e):
+      // A transport-level failure (socket closed, connection refused, DNS)
+      // never reached a provider decision, so the turn is safe to re-issue.
+      // Without this the error classifies as UnknownError and the turn dies
+      // on the first network blip.
+      return new APIError(
+        {
+          message: errorMessage(e),
+          isRetryable: true,
+          metadata: {
+            code: (e as Error & { code?: string }).code ?? "",
+            message: errorMessage(e),
+          },
         },
         { cause: e },
       ).toObject()

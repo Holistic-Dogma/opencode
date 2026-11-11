@@ -32,6 +32,21 @@ import { LLMRequestPrep } from "./llm/request"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
+/**
+ * Default request-level retry budget handed to the AI SDK.
+ *
+ * The loud-class death (an explicit APIError raised mid-flight — "Cannot
+ * connect to API: socket connection closed unexpectedly") reaches the
+ * provider as a retryable APICallError, but the SDK's own retry is disabled
+ * at 0, so a single dropped socket kills the request outright. The AI SDK
+ * default is 2; kittyhawk's agent-soliton mirror uses the same shape (3
+ * attempts: one initial + two retries) for both its streaming and fetch
+ * paths. 2 is kept here so opencode matches the SDK default rather than
+ * inventing a larger budget — the turn-level re-issue in
+ * SessionProcessor/Effect.retry remains the outer bound.
+ */
+export const DEFAULT_MAX_RETRIES = 2
+
 export type StreamInput = {
   user: SessionV1.User
   sessionID: string
@@ -320,7 +335,7 @@ const live: Layer.Layer<
           maxOutputTokens: prepared.params.maxOutputTokens,
           abortSignal: input.abort,
           headers: prepared.headers,
-          maxRetries: input.retries ?? 0,
+          maxRetries: input.retries ?? DEFAULT_MAX_RETRIES,
           messages: prepared.messages,
           model: wrapLanguageModel({
             model: language,

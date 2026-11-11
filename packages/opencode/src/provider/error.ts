@@ -20,6 +20,41 @@ export class ResponseStreamError extends Error {
   }
 }
 
+/**
+ * Network-class failure codes. These are transport failures, not provider
+ * rejections: the request never reached a decision, so re-issuing it is
+ * safe. Mirrors the retryable network-code set in kittyhawk's
+ * agent-soliton (isRetryableStreamFailure).
+ */
+const RETRYABLE_NETWORK_CODES = new Set([
+  "ConnectionClosed",
+  "ConnectionRefused",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ETIMEDOUT",
+  "EPIPE",
+  "FailedToOpenSocket",
+  "UND_ERR_SOCKET",
+  "UND_ERR_CONNECT_TIMEOUT",
+])
+
+/**
+ * True when a raw provider error is a transport-level failure that should be
+ * re-issued rather than surfaced as a dead turn.
+ *
+ * Two signals, matching kittyhawk's agent-soliton: a retryable network code
+ * on the error, or a message that names a transport failure. Deliberately
+ * narrow — provider-level rejections (4xx, quota, auth) must NOT match here.
+ */
+export function isRetryableNetworkError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false
+  const code = (e as Error & { code?: string }).code
+  if (code && RETRYABLE_NETWORK_CODES.has(code)) return true
+  return /socket connection (?:was )?closed|connection closed unexpectedly|fetch failed|failed to fetch|network error|connection refused|connection reset|econnreset|econnrefused|etimedout|epipe|enotfound|eai_again|getaddrinfo/i.test(
+    e.message,
+  )
+}
+
 function isOpenAiErrorRetryable(e: APICallError) {
   const status = e.statusCode
   if (!status) return e.isRetryable

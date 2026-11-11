@@ -687,6 +687,10 @@ it.live("session.processor effect tests publish retry status updates", () =>
         const { processors, session, provider } = yield* boot()
         const events = yield* EventV2Bridge.Service
 
+        // Three 503s: the AI SDK's own request-level retry budget (maxRetries=2)
+        // is exhausted first, then the turn-level policy re-issues the turn.
+        yield* llm.error(503, { error: "boom" })
+        yield* llm.error(503, { error: "boom" })
         yield* llm.error(503, { error: "boom" })
         yield* llm.text("")
 
@@ -727,7 +731,7 @@ it.live("session.processor effect tests publish retry status updates", () =>
         yield* off
 
         expect(value).toBe("continue")
-        expect(yield* llm.calls).toBe(2)
+        expect(yield* llm.calls).toBe(4)
         expect(states).toStrictEqual([1])
       }),
     { config: (url) => providerCfg(url) },
